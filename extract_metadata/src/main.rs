@@ -70,7 +70,7 @@ impl WorkspaceMemberMetadata {
                             }
                         };
                         (
-                            nd.name.clone(),
+                            n.id.to_string().split(' ').next().unwrap().to_string(),
                             (
                                 WorkspaceDependency {
                                     default_features: false,
