@@ -2,6 +2,9 @@
 let
   name = "merged-targets-${builtins.concatStringsSep "-" (["default"] ++ (pkgs.lib.mapAttrsToList (name: _: name) derivations))}";
 in
+# This derivation results in a merged set of different workspace members.
+# The default (aka the 'external dependencies') are always included, 
+# and then only the required local dependencies are added.
 pkgs.runCommandLocal name { } ''
   mkdir -p $out
   echo "Copying default workspace artifacts"

@@ -1,20 +1,19 @@
 { pkgs, crane, mergeTargets, mkDummySrcFor, workspaceMetadata }: src:
 let
   metadata = workspaceMetadata src;
-  get_dependencies_for = name: metadata: pkgs.runCommandLocal "deps.toml" { buildInputs = [ pkgs.dasel ]; } ''
-    dasel -r toml -f ${metadata} 'workspace_member_info.${name}.dependencies' > $out
+  parsedMetadata = builtins.fromTOML (builtins.readFile metadata);
+  getDependenciesFor = crate_name: metadata: pkgs.runCommandLocal "deps.toml" { buildInputs = [ pkgs.dasel ]; } ''
+    dasel -r toml -f ${metadata} 'workspace_member_info.${crate_name}.dependencies' > $out
   '';
-
   workspaceArtifacts = crane.buildDepsOnly {
     inherit src;
     pname = "workspace";
     version = "unknown";
   };
-  parsedData = builtins.fromTOML (builtins.readFile metadata);
   patchCargoToml = name:
     let
-      dep_all_crates_with_features = get_dependencies_for name metadata;
-      dep_manifest_path = parsedData.workspace_member_info.${name}.manifest_path;
+      dep_all_crates_with_features = getDependenciesFor name metadata;
+      dep_manifest_path = parsedMetadata.workspace_member_info.${name}.manifest_path;
     in
     ''
       ALL_DEPS=$(cat ${dep_all_crates_with_features})
@@ -25,7 +24,7 @@ let
     (crate_name: crate_info:
       let
         crateSrc = mkDummySrcFor src crate_name ([ (builtins.dirOf crate_info.manifest_path) ] ++ crate_info.workspace_path_dependencies);
-        all_crates_with_features = get_dependencies_for crate_name metadata;
+        all_crates_with_features = getDependenciesFor crate_name metadata;
         cargoArtifacts = mergeTargets workspaceArtifacts (pkgs.lib.getAttrs crate_info.workspace_deps workspaceMembers);
       in
       crane.cargoBuild {
@@ -46,10 +45,10 @@ let
 
         cargoExtraArgs = "-v -p ${crate_name}";
       })
-    parsedData.workspace_member_info;
+    parsedMetadata.workspace_member_info;
   finalArtifacts = mergeTargets workspaceArtifacts workspaceMembers;
   finalSrc = pkgs.runCommandLocal "final-workspace-source" { } (
-    let dummy_src = mkDummySrcFor src "workspace" (pkgs.lib.mapAttrsToList (_: info: (builtins.dirOf info.manifest_path)) parsedData.workspace_member_info);
+    let dummy_src = mkDummySrcFor src "workspace" (pkgs.lib.mapAttrsToList (_: info: (builtins.dirOf info.manifest_path)) parsedMetadata.workspace_member_info);
     in
     ''
       mkdir -p $out
@@ -57,7 +56,7 @@ let
       cp --recursive --no-preserve=mode,ownership ${dummy_src}/. -t $out
       cd $out
       echo "Patching Cargo.tomls"
-      ${builtins.concatStringsSep "\n" (builtins.map patchCargoToml (builtins.attrNames parsedData.workspace_member_info))}
+      ${builtins.concatStringsSep "\n" (builtins.map patchCargoToml (builtins.attrNames parsedMetadata.workspace_member_info))}
     ''
   );
 
