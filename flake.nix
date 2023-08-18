@@ -24,10 +24,13 @@
   outputs = inputs:
 
     let
-      buildWorkspace = { pkgs, crane, src }: (import ./lib {
+      buildWorkspace = { pkgs, crane, src, buildInputs ? [] }: (import ./lib {
         inherit pkgs crane;
         nix-filter = inputs.nix-filter;
-      }) src;
+      }) {
+        inherit src;
+        inherit buildInputs;
+      };
     in
     { inherit buildWorkspace; } // inputs.flake-utils.lib.eachDefaultSystem (system:
       let

@@ -1,4 +1,5 @@
-{ pkgs, crane, mergeTargets, mkDummySrcFor, workspaceMetadata }: src:
+{ pkgs, crane, mergeTargets, mkDummySrcFor, workspaceMetadata }:
+{ src, buildInputs }:
 let
   metadata = workspaceMetadata src;
   parsedMetadata = builtins.fromTOML (builtins.readFile metadata);
@@ -9,6 +10,8 @@ let
     inherit src;
     pname = "workspace";
     version = "unknown";
+
+    inherit buildInputs;
   };
   patchCargoToml = name:
     let
@@ -44,6 +47,8 @@ let
         '';
 
         cargoExtraArgs = "-v -p ${crate_name}";
+
+        inherit buildInputs;
       })
     parsedMetadata.workspace_member_info;
   finalArtifacts = mergeTargets workspaceArtifacts workspaceMembers;
@@ -70,4 +75,6 @@ crane.buildPackage {
   doNotLinkInheritedArtifacts = "true";
 
   cargoExtraArgs = "-vvv";
+
+  inherit buildInputs;
 }
