@@ -97,10 +97,6 @@ struct WorkspaceLocalDependency {
 struct WorkspaceMemberMetadata {
     manifest_path: String,
     dependencies: BTreeMap<String, WorkspaceDependency>,
-    #[serde(rename = "dev-dependencies")]
-    dev_dependencies: BTreeMap<String, WorkspaceDependency>,
-    #[serde(rename = "build-dependencies")]
-    build_dependencies: BTreeMap<String, WorkspaceDependency>,
     features: BTreeMap<String, Vec<String>>,
     workspace_deps: Vec<WorkspaceLocalDependency>,
 }
@@ -127,6 +123,12 @@ impl WorkspaceMemberMetadata {
                 .find(|n| &n.id == id)
         };
 
+        let is_normal_dep = |dep: &&cargo_metadata::NodeDep| {
+            dep.dep_kinds
+                .iter()
+                .any(|d| matches!(d.kind, cargo_metadata::DependencyKind::Normal))
+        };
+
         // All dependencies that are _directly_ referenced in the workspace
         let direct_workspace_dependencies: Vec<&cargo_metadata::Node> = metadata
             .workspace_packages()
@@ -138,6 +140,7 @@ impl WorkspaceMemberMetadata {
                 package_node
                     .deps
                     .iter()
+                    .filter(is_normal_dep)
                     .map(|dep| package_for_id(&dep.pkg).unwrap())
             })
             .unique_by(|n| n.id.clone())
@@ -148,6 +151,7 @@ impl WorkspaceMemberMetadata {
             .unwrap()
             .deps
             .iter()
+            .filter(is_normal_dep)
             .map(|nd| {
                 let dep_node = package_for_id(&nd.pkg).unwrap();
                 let path: Option<String> = {
@@ -169,7 +173,7 @@ impl WorkspaceMemberMetadata {
                 };
                 let (name, version) = dep_node.id.repr.split(' ').next_tuple().unwrap();
                 (
-                    nd.name.clone(),
+                    name.to_owned(),
                     WorkspaceDependency {
                         default_features: false,
                         features: feature_sets
@@ -185,7 +189,6 @@ impl WorkspaceMemberMetadata {
                         version: version.to_owned(),
                         path,
                         id: dep_node.id.clone(),
-                        dep_kind: DepKind::from_kinds(&nd.dep_kinds),
                     },
                 )
             })
@@ -224,11 +227,6 @@ impl WorkspaceMemberMetadata {
                         package: name.to_owned(),
                         path: None,
                         id: n.id.clone(),
-                        dep_kind: DepKind {
-                            normal: true,
-                            dev: false,
-                            build: false,
-                        },
                     },
                 )
             })
@@ -338,26 +336,9 @@ impl WorkspaceMemberMetadata {
             });
         }
 
-        let dev_dependencies = dependencies
-            .clone()
-            .into_iter()
-            .filter(|dep| dep.1.dep_kind.dev)
-            .collect();
-
-        let build_dependencies = dependencies
-            .clone()
-            .into_iter()
-            .filter(|dep| dep.1.dep_kind.build)
-            .collect();
-
-        let mut dependencies = dependencies;
-        dependencies.retain(|_, dep| dep.dep_kind.normal);
-
         WorkspaceMemberMetadata {
             manifest_path,
             dependencies,
-            dev_dependencies,
-            build_dependencies,
             features,
             workspace_deps,
         }
@@ -366,31 +347,6 @@ impl WorkspaceMemberMetadata {
 
 fn is_some_false(opt: &Option<bool>) -> bool {
     opt.is_some_and(|b| !b)
-}
-
-#[derive(Debug, Clone)]
-struct DepKind {
-    normal: bool,
-    dev: bool,
-    build: bool,
-}
-impl DepKind {
-    fn from_kinds(dep_kinds: &[cargo_metadata::DepKindInfo]) -> DepKind {
-        let normal = dep_kinds.iter().any(|d| {
-            matches!(
-                d.kind,
-                cargo_metadata::DependencyKind::Normal | cargo_metadata::DependencyKind::Unknown
-            )
-        });
-        let dev = dep_kinds
-            .iter()
-            .any(|d| matches!(d.kind, cargo_metadata::DependencyKind::Development));
-        let build = dep_kinds
-            .iter()
-            .any(|d| matches!(d.kind, cargo_metadata::DependencyKind::Build));
-
-        DepKind { normal, dev, build }
-    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -405,8 +361,6 @@ struct WorkspaceDependency {
     path: Option<String>,
     #[serde(skip)]
     id: PackageId,
-    #[serde(skip)]
-    dep_kind: DepKind,
 }
 
 impl WorkspaceMetadataInfo {

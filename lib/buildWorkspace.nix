@@ -1,6 +1,5 @@
 { pkgs, crane, mergeTargets, workspaceMetadata, nix-filter }: { src, args ? { } }:
 let
-  doCheck = true;
   globalDummy = crane.mkDummySrc {
     inherit src;
     pname = "name";
@@ -9,13 +8,19 @@ let
       find $out -iname "Cargo.toml" | while read TOML_FILE; do
         echo "Removing dev-dependencies from $TOML_FILE"
         chmod u+w $TOML_FILE
-        # ${pkgs.dasel}/bin/dasel delete -s "dev-dependencies" -f "$TOML_FILE" 2>/dev/null || true
+        ${pkgs.dasel}/bin/dasel delete -s "dev-dependencies" -f "$TOML_FILE" 2>/dev/null || true
       done
       echo "Erased all dev-deps"
     '';
   };
   rawMetadata = workspaceMetadata globalDummy;
   metadata = builtins.fromTOML (builtins.readFile rawMetadata);
+  get_dependencies_for = name: rawMetadata: pkgs.runCommandLocal "deps.toml" { buildInputs = [ pkgs.dasel ]; } ''
+    dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.dependencies' > $out
+  '';
+  get_features_for = name: rawMetadata: pkgs.runCommandLocal "features.toml" { buildInputs = [ pkgs.dasel ]; } ''
+    dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.features' > $out
+  '';
   cargoVendorDir = crane.vendorCargoDeps { inherit src; };
   workspaceDependencies = crane.buildDepsOnly
     (args // {
@@ -24,7 +29,7 @@ let
       pname = "workspace";
       version = "unknown";
 
-      inherit doCheck;
+      doCheck = false;
 
       # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
       cargoExtraArgs = "--offline";
@@ -62,38 +67,25 @@ let
     '';
   patchCargoToml = { name, replaceDeps ? true, replaceFeatures ? true, removeDevDeps ? true }:
     let
-      get_from_metadata = field: pkgs.runCommandLocal "${field}.toml" { buildInputs = [ pkgs.dasel ]; } ''
-        dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.${field}' > $out
-      '';
+      dep_all_crates_with_features = get_dependencies_for name rawMetadata;
+      dep_all_features_with_crates = get_features_for name rawMetadata;
       dep_manifest_path = metadata.workspace_member_info.${name}.manifest_path;
-      normal_deps = get_from_metadata "dependencies";
-      dev_deps = get_from_metadata "dev-dependencies";
-      build_deps = get_from_metadata "build-dependencies";
-      enabled_features = get_from_metadata "features";
       doReplaceDeps = ''
         # Replace all dependencies
-        ALL_NORMAL_DEPS=$(cat ${normal_deps})
-        echo "Patching 'dependencies' ${dep_manifest_path} with ${normal_deps}"
-        ${pkgs.dasel}/bin/dasel put -r toml -t toml -v "$ALL_NORMAL_DEPS" -f ${dep_manifest_path} "dependencies"
-
-        ALL_DEV_DEPS=$(cat ${dev_deps})
-        echo "Patching 'dependencies' ${dep_manifest_path} with ${dev_deps}"
-        ${pkgs.dasel}/bin/dasel put -r toml -t toml -v "$ALL_DEV_DEPS" -f ${dep_manifest_path} "dev-dependencies"
-
-        ALL_BUILD_DEPS=$(cat ${build_deps})
-        echo "Patching 'dependencies' ${dep_manifest_path} with ${build_deps}"
-        ${pkgs.dasel}/bin/dasel put -r toml -t toml -v "$ALL_BUILD_DEPS" -f ${dep_manifest_path} "build-dependencies"
+        ALL_DEPS=$(cat ${dep_all_crates_with_features})
+        echo "Patching ${dep_manifest_path} with ${dep_all_crates_with_features}"
+        ${pkgs.dasel}/bin/dasel put -r toml -t toml -v "$ALL_DEPS" -f ${dep_manifest_path} "dependencies"
       '';
       doReplaceFeatures = ''
         # Replace all features
-        ALL_FEATURES=$(cat ${enabled_features})
-        echo "Patching ${dep_manifest_path} with ${enabled_features}"
+        ALL_FEATURES=$(cat ${dep_all_features_with_crates})
+        echo "Patching ${dep_manifest_path} with ${dep_all_features_with_crates}"
         ${pkgs.dasel}/bin/dasel put -r toml -t toml -v "$ALL_FEATURES" -f ${dep_manifest_path} "features"
       '';
       doRemoveDevDeps = ''
         # Try removing dev-dependencies, if it doesn't exist just skip
-        # echo "Removing dev dependencies for ${dep_manifest_path}"
-        # ${pkgs.dasel}/bin/dasel delete -s "dev-dependencies" -f ${dep_manifest_path} 2>/dev/null || true
+        echo "Removing dev dependencies for ${dep_manifest_path}"
+        ${pkgs.dasel}/bin/dasel delete -s "dev-dependencies" -f ${dep_manifest_path} 2>/dev/null || true
       '';
     in
     (pkgs.lib.optionalString replaceDeps doReplaceDeps)
@@ -132,8 +124,6 @@ let
           version = "unknown";
           src = globalDummy;
 
-          inherit doCheck;
-
           # Don't let crane install artifacts
           doInstallCargoArtifacts = false;
 
@@ -152,10 +142,7 @@ let
             cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
             cargoWithProfile build -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
           '';
-          checkPhaseCargoCommand = ''
-            cargoWithProfile build --tests -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
-          '';
-          preInstall = ''
+          postBuild = ''
             ${hashDirectory}/bin/hashDirectory target > post_build_hashes
           '';
 
@@ -181,8 +168,6 @@ let
             cat changed_files \
               | xargs -P $NIX_BUILD_CORES -I '##{}##' cp "##{}##" "$artifacts/##{}##"
 
-            echo "Copied $(wc -l < changed_files) files as artifacts"
-
             # Also copy any binaries we might have built
 
             installFromCargoBuildLog "$out" "$cargoBuildLog"
@@ -192,7 +177,7 @@ let
         }) // { inherit cargoArtifacts; })
     metadata.workspace_member_info;
   debug = {
-    inherit workspaceDependencies rawMetadata;
+    inherit workspaceDependencies;
 
     workspace_structure = pkgs.lib.mapAttrs
       (k: v: {
@@ -218,7 +203,7 @@ crane.buildPackage
 
     # CARGO_LOG = "cargo::core::compiler::fingerprint=trace";
 
-    inherit doCheck;
+    doCheck = false;
 
     # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
     cargoExtraArgs = "--offline";
