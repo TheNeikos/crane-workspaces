@@ -1,16 +1,19 @@
-{ pkgs }: default_derivation: derivations:
+{ pkgs, crane }: default_derivation: derivations:
 let
+  inherit (pkgs.lib) getOutput;
+  getArtifacts = getOutput "artifacts";
   name = "merged-targets-${builtins.concatStringsSep "-" (["default"] ++ (pkgs.lib.mapAttrsToList (name: _: name) derivations))}";
 in
-# This derivation results in a merged set of different workspace members.
-# The default (aka the 'external dependencies') are always included, 
-# and then only the required local dependencies are added.
-pkgs.runCommandLocal name { } ''
+pkgs.runCommandLocal name { nativeBuildInputs = [ crane.inheritCargoArtifactsHook pkgs.rsync ]; } ''
   mkdir -p $out
+  cd $out
   echo "Copying default workspace artifacts"
-  cp --recursive --no-preserve=mode,ownership ${default_derivation}/. -t $out
+  # export doNotLinkInheritedArtifacts=1
+
+  inheritCargoArtifacts ${default_derivation}
+
   ${builtins.concatStringsSep "\n" (pkgs.lib.mapAttrsToList (name: drv: ''
-      echo "Copying artifacts from ${name}: ${drv}"
-      cp --remove-destination --recursive --no-preserve=mode,ownership ${drv}/. -t $out
+      echo "Copying artifacts from ${name}: ${getArtifacts drv}"
+      inheritCargoArtifacts ${getArtifacts drv}
     '') derivations)}
 ''

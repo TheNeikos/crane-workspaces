@@ -1,7 +1,7 @@
 { pkgs, crane, nix-filter }:
 
 let
-  # Compose all the different functions together
+  # Handler crate
   callPackage = pkgs.lib.callPackageWith (pkgs // packages // { inherit nix-filter crane; });
   packages = {
     extractMetadata = crane.buildPackage {

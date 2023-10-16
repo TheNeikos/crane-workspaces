@@ -6,4 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+middle = { version = "0.1.0", path = "../others/middle" }
 tokio = { version = "1.28.2", features = ["fs"] }
