@@ -224,6 +224,7 @@ let
 
               passthru = {
                 inherit workspaceMembers;
+                inherit debug;
               };
             });
       in
