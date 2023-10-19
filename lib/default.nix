@@ -11,6 +11,7 @@ let
     mkDummySrcFor = callPackage ./mkDummySrcFor.nix { };
     mergeTargets = callPackage ./mergeTargets.nix { };
     buildWorkspace = callPackage ./buildWorkspace.nix { };
+    inheritWorkspaceArtifacts = callPackage ./inheritWorkspaceArtifacts.nix { };
   };
 
 in

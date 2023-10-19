@@ -1,4 +1,4 @@
-{ pkgs, crane, mergeTargets, workspaceMetadata, nix-filter }: { src, args ? { } }:
+{ pkgs, crane, mergeTargets, inheritWorkspaceArtifacts, workspaceMetadata, nix-filter }: { src, args ? { } }:
 let
   globalDummy = crane.mkDummySrc {
     inherit src;
@@ -111,100 +111,133 @@ let
         cp -r "${source}" --no-target-directory . --preserve=timestamps --no-preserve=ownership
       '') (builtins.tail sources))}
     '';
-  workspaceMembers = builtins.mapAttrs
+  callWorkspacePackage = pkgs.lib.callPackageWith workspaceMembers;
+  workspaceMembers = (builtins.mapAttrs
     (crate_name: crate_info:
       let
-        cargoArtifacts = mergeTargets workspaceDependencies (pkgs.lib.getAttrs (builtins.map (n: n.name) crate_info.workspace_deps) workspaceMembers);
+        crate_deps = (builtins.map (n: n.name) crate_info.workspace_deps);
+        drv = members: crane.mkCargoDerivation
+          (args // {
+            inherit cargoVendorDir;
+            pname = crate_name;
+            pnameSuffix = "-ws-build";
+            version = "unknown";
+
+            src = globalDummy;
+            cargoArtifacts = workspaceDependencies;
+
+            # Don't let crane install artifacts
+            doInstallCargoArtifacts = false;
+
+            nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
+              crane.installFromCargoBuildLogHook
+              pkgs.jq
+              crane.removeReferencesToVendoredSourcesHook
+              inheritWorkspaceArtifacts
+            ];
+            workspaceArtifacts = map (pkgs.lib.getOutput "artifacts") (pkgs.lib.attrVals crate_deps members);
+
+            prePatch = ''
+              ${
+                installSourcesFor {
+                  names = ([ crate_name ] ++ crate_deps);
+                  preserveFirst = false;
+                }
+              }
+            '';
+            preBuild = ''
+              ${hashDirectory}/bin/hashDirectory target > pre_build_hashes
+            '';
+            buildPhaseCargoCommand = ''
+              cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
+              cargoWithProfile build -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
+            '';
+            postBuild = ''
+              ${hashDirectory}/bin/hashDirectory target > post_build_hashes
+            '';
+
+            outputs = [ "out" "artifacts" ];
+
+            # CARGO_LOG = "cargo::core::compiler::fingerprint=trace";
+
+            installPhase = ''
+              runHook preInstall
+
+              # Copy any artifacts we produced
+
+              mkdir -p $artifacts
+
+              (diff pre_build_hashes post_build_hashes || true) |\
+                awk '/> (.*):.*/ {split($2, pieces, ":"); print "target/" pieces[1];}' > changed_files
+
+              cat changed_files \
+                | xargs --no-run-if-empty -n1 dirname \
+                | sort -u \
+                | (cd "$artifacts"; xargs --no-run-if-empty mkdir -p)
+
+              cat changed_files \
+                | xargs -P $NIX_BUILD_CORES -I '##{}##' cp "##{}##" "$artifacts/##{}##"
+
+              cat > $artifacts/inherit_artifacts <<EOF
+                #! ${pkgs.bash}/bin/bash
+                echo "You should be getting ${crate_name} artifacts!"
+              EOF
+              chmod +x $artifacts/inherit_artifacts
+
+              # Also copy any binaries we might have built
+
+              installFromCargoBuildLog "$out" "$cargoBuildLog"
+
+              runHook postInstall
+            '';
+          });
+
       in
-      crane.mkCargoDerivation
-        (args // {
-          inherit cargoArtifacts cargoVendorDir;
-          pname = crate_name;
-          pnameSuffix = "-ws-build";
-          version = "unknown";
-          src = globalDummy;
+      callWorkspacePackage (pkgs.lib.setFunctionArgs drv (builtins.listToAttrs (builtins.map (d: { name = "${d}"; value = true; }) crate_deps))) { })
+    metadata.workspace_member_info) // {
+    _workspace =
+      let
+        workspaceMembers = (builtins.attrNames metadata.workspace_member_info);
+        drv = members:
+          crane.buildPackage
+            (args // {
+              inherit cargoVendorDir;
+              src = globalDummy;
+              cargoArtifacts = workspaceDependencies;
+              workspaceArtifacts = map (pkgs.lib.getOutput "artifacts") (pkgs.lib.attrVals workspaceMembers members);
+              nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
+                inheritWorkspaceArtifacts
+              ];
+              pname = "workspace";
+              version = "unknown";
 
-          # Don't let crane install artifacts
-          doInstallCargoArtifacts = false;
+              prePatch = ''
+                ${installSourcesFor { names = builtins.attrNames metadata.workspace_member_info; } }
+              '';
 
-          nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
-            crane.installFromCargoBuildLogHook
-            pkgs.jq
-            crane.removeReferencesToVendoredSourcesHook
-          ];
+              # CARGO_LOG = "cargo::core::compiler::fingerprint=trace";
 
-          prePatch = installSourcesFor { names = ([ crate_name ] ++ (builtins.map (n: n.name) crate_info.workspace_deps)); preserveFirst = false; };
+              doCheck = false;
 
-          preBuild = ''
-            ${hashDirectory}/bin/hashDirectory target > pre_build_hashes
-          '';
-          buildPhaseCargoCommand = ''
-            cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-            cargoWithProfile build -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
-          '';
-          postBuild = ''
-            ${hashDirectory}/bin/hashDirectory target > post_build_hashes
-          '';
+              # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
+              cargoExtraArgs = "--offline";
 
-          outputs = [ "out" "artifacts" ];
-
-          # CARGO_LOG = "cargo::core::compiler::fingerprint=trace";
-
-          installPhase = ''
-            runHook preInstall
-
-            # Copy any artifacts we produced
-
-            mkdir -p $artifacts
-
-            (diff pre_build_hashes post_build_hashes || true) |\
-              awk '/> (.*):.*/ {split($2, pieces, ":"); print "target/" pieces[1];}' > changed_files
-
-            cat changed_files \
-              | xargs --no-run-if-empty -n1 dirname \
-              | sort -u \
-              | (cd "$artifacts"; xargs --no-run-if-empty mkdir -p)
-
-            cat changed_files \
-              | xargs -P $NIX_BUILD_CORES -I '##{}##' cp "##{}##" "$artifacts/##{}##"
-
-            # Also copy any binaries we might have built
-
-            installFromCargoBuildLog "$out" "$cargoBuildLog"
-
-            runHook postInstall
-          '';
-        }) // { inherit cargoArtifacts; })
-    metadata.workspace_member_info;
+              passthru = {
+                inherit workspaceMembers;
+              };
+            });
+      in
+      callWorkspacePackage (pkgs.lib.setFunctionArgs drv (builtins.listToAttrs (builtins.map (d: { name = "${d}"; value = true; }) (builtins.attrNames metadata.workspace_member_info)))) { };
+  };
   debug = {
     inherit workspaceDependencies;
 
     workspace_structure = pkgs.lib.mapAttrs
       (k: v: {
-        deps = v.workspace_deps;
         sources = mkSrc k;
-        artifacts = workspaceMembers.${k}.cargoArtifacts;
       })
       metadata.workspace_member_info;
   };
 
 in
-crane.buildPackage
-  (args // {
-    inherit cargoVendorDir;
-    cargoArtifacts = mergeTargets workspaceDependencies workspaceMembers;
-    src = globalDummy;
-    pname = "workspace";
-    version = "unknown";
-
-    prePatch = ''
-      ${installSourcesFor { names = builtins.attrNames metadata.workspace_member_info; } }
-    '';
-
-    # CARGO_LOG = "cargo::core::compiler::fingerprint=trace";
-
-    doCheck = false;
-
-    # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
-    cargoExtraArgs = "--offline";
-  }) // workspaceMembers // { inherit debug; }
+workspaceMembers._workspace
