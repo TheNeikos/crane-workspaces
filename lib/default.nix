@@ -1,10 +1,10 @@
-{ pkgs, crane, nix-filter }:
+{ pkgs, crane, craneInternal, nix-filter }:
 
 let
   # Handler crate
   callPackage = pkgs.lib.callPackageWith (pkgs // packages // { inherit nix-filter crane; });
   packages = {
-    extractMetadata = crane.buildPackage {
+    extractMetadata = craneInternal.buildPackage {
       src = ../extract_metadata;
     };
     workspaceMetadata = callPackage ./workspaceMetadata.nix { };
