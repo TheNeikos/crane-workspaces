@@ -24,13 +24,14 @@
   outputs = inputs:
 
     let
-      buildWorkspace = args@{ pkgs, crane, src, ... }:
+      mkRustTarget = pkgs: pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      buildWorkspace = args@{ pkgs, crane, src, craneInternal ? (crane.overrideToolchain (mkRustTarget pkgs)), ... }:
         (import ./lib {
-          inherit pkgs crane;
+          inherit pkgs crane craneInternal;
           nix-filter = inputs.nix-filter;
         }) {
           inherit src;
-          args = (builtins.removeAttrs args [ "pkgs" "src" "crane" ]);
+          args = (builtins.removeAttrs args [ "pkgs" "src" "crane" "craneInternal" ]);
         };
     in
     { inherit buildWorkspace; } // inputs.flake-utils.lib.eachDefaultSystem (system:
