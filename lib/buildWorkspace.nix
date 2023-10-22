@@ -21,7 +21,7 @@ let
   get_features_for = name: rawMetadata: pkgs.runCommandLocal "features.toml" { buildInputs = [ pkgs.dasel ]; } ''
     dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.features' > $out
   '';
-  cargoVendorDir = crane.vendorCargoDeps { inherit src; };
+  cargoVendorDir = args.cargoVendorDir or (crane.vendorCargoDeps { inherit src; });
   workspaceDependencies = crane.buildDepsOnly
     (args // {
       inherit cargoVendorDir;
