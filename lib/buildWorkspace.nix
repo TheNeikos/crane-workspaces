@@ -32,7 +32,7 @@ let
       doCheck = false;
 
       # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
-      cargoExtraArgs = "--offline";
+      cargoExtraArgs = (args.cargoExtraArgs or "") + " --offline";
     });
   hashDirectory = pkgs.writeShellApplication {
     name = "hashDirectory";
@@ -150,7 +150,7 @@ let
             '';
             buildPhaseCargoCommand = ''
               cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-              cargoWithProfile build -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
+              cargoWithProfile build ${args.cargoExtraArgs or ""} -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
             '';
             postBuild = ''
               ${hashDirectory}/bin/hashDirectory target > post_build_hashes
@@ -220,7 +220,7 @@ let
               doCheck = false;
 
               # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
-              cargoExtraArgs = "--offline";
+              cargoExtraArgs = (args.cargoExtraArgs or "") + " --offline";
 
               passthru = {
                 inherit workspaceMembers;
