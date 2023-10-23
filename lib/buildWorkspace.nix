@@ -197,14 +197,14 @@ let
     metadata.workspace_member_info) // {
     _workspace =
       let
-        workspaceMembers = (builtins.attrNames metadata.workspace_member_info);
+        workspaceMemberNames = (builtins.attrNames metadata.workspace_member_info);
         drv = members:
           crane.buildPackage
             (args // {
               inherit cargoVendorDir;
               src = globalDummy;
               cargoArtifacts = workspaceDependencies;
-              workspaceArtifacts = map (pkgs.lib.getOutput "artifacts") (pkgs.lib.attrVals workspaceMembers members);
+              workspaceArtifacts = map (pkgs.lib.getOutput "artifacts") (pkgs.lib.attrVals workspaceMemberNames members);
               nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
                 inheritWorkspaceArtifacts
               ];
