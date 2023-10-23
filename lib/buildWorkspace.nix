@@ -21,7 +21,7 @@ let
   get_features_for = name: rawMetadata: pkgs.runCommandLocal "features.toml" { buildInputs = [ pkgs.dasel ]; } ''
     dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.features' > $out
   '';
-  cargoVendorDir = crane.vendorCargoDeps { inherit src; };
+  cargoVendorDir = args.cargoVendorDir or (crane.vendorCargoDeps { inherit src; });
   workspaceDependencies = crane.buildDepsOnly
     (args // {
       inherit cargoVendorDir;
@@ -32,7 +32,7 @@ let
       doCheck = false;
 
       # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
-      cargoExtraArgs = "--offline";
+      cargoExtraArgs = (args.cargoExtraArgs or "") + " --offline";
     });
   hashDirectory = pkgs.writeShellApplication {
     name = "hashDirectory";
@@ -150,7 +150,7 @@ let
             '';
             buildPhaseCargoCommand = ''
               cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-              cargoWithProfile build -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
+              cargoWithProfile build ${args.cargoExtraArgs or ""} -p ${crate_name} --message-format json-render-diagnostics >"$cargoBuildLog"
             '';
             postBuild = ''
               ${hashDirectory}/bin/hashDirectory target > post_build_hashes
@@ -220,7 +220,7 @@ let
               doCheck = false;
 
               # We need to allow changing the lock file, but this is harmless, as we do not change the buildgraph
-              cargoExtraArgs = "--offline";
+              cargoExtraArgs = (args.cargoExtraArgs or "") + " --offline";
 
               passthru = {
                 inherit workspaceMembers;
