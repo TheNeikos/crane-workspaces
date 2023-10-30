@@ -19,13 +19,14 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
+
+    let feature_sets = get_feature_sets(&args.target_platform);
+
     let metadata = MetadataCommand::new()
         .manifest_path(args.manifest_path)
         .other_options(["--filter-platform".to_string(), args.target_platform])
         .exec()
         .unwrap();
-
-    let feature_sets = get_feature_sets();
 
     let wmi = WorkspaceMetadataInfo::from_metadata(metadata, feature_sets);
 
@@ -34,7 +35,7 @@ fn main() {
 
 /// cargo tree -f '{p}|{f}' --prefix none --target x86_64-unknown-linux-gnu
 
-fn get_feature_sets() -> HashMap<(String, String), Vec<String>> {
+fn get_feature_sets(target_platform: &str) -> HashMap<(String, String), Vec<String>> {
     let mut cargo_tree = Command::new("cargo");
     cargo_tree.args([
         "tree",
@@ -43,7 +44,7 @@ fn get_feature_sets() -> HashMap<(String, String), Vec<String>> {
         "--prefix",
         "none",
         "--target",
-        "x86_64-unknown-linux-gnu",
+        target_platform
     ]);
 
     cargo_tree.stdin(Stdio::null());

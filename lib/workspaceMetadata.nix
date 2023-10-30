@@ -1,9 +1,9 @@
 { pkgs, crane, extractMetadata }:
-dummySrc: crane.mkCargoDerivation {
+dummySrc: buildTarget: crane.mkCargoDerivation {
   cargoArtifacts = null;
   nativeBuildInputs = [ extractMetadata ];
   buildPhaseCargoCommand = ''
-    extract_metadata Cargo.toml x86_64-unknown-linux-gnu > $out
+    extract_metadata Cargo.toml ${buildTarget} > $out
   '';
 
   src = dummySrc;
