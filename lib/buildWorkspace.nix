@@ -13,7 +13,7 @@ let
       echo "Erased all dev-deps"
     '';
   };
-  rawMetadata = workspaceMetadata globalDummy;
+  rawMetadata = workspaceMetadata globalDummy (args.CARGO_BUILD_TARGET or "x86_64-unknown-linux-gnu");
   metadata = builtins.fromTOML (builtins.readFile rawMetadata);
   get_dependencies_for = name: rawMetadata: pkgs.runCommandLocal "deps.toml" { buildInputs = [ pkgs.dasel ]; } ''
     dasel -r toml -f ${rawMetadata} 'workspace_member_info.${name}.dependencies' > $out
